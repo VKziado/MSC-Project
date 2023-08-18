@@ -1,0 +1,23 @@
+﻿  Building Custom Rule E:/MSC-Project/simpleopengl/CMakeLists.txt
+  appbase.cpp
+  camera.cpp
+  common.cpp
+  device.cpp
+  environment.cpp
+  grid.cpp
+  gui.cpp
+  image.cpp
+  input.cpp
+  light.cpp
+  material.cpp
+  model.cpp
+  node.cpp
+  renderserver.cpp
+  scene.cpp
+  technique.cpp
+  texture.cpp
+  transform.cpp
+  types.cpp
+  正在生成代码...
+E:\MSC-Project\simpleopengl\common\image.cpp(21): warning C4715: “saveImage”: 不是所有的控件路径都返回值
+  common.vcxproj -> E:\MSC-Project\simpleopengl\build\Debug\commond.lib

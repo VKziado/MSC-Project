@@ -1,0 +1,213 @@
+#version 460
+
+layout(local_size_x = 1024) in;
+
+layout(binding = 0) uniform sampler2D inDepth;
+layout(binding = 1) uniform sampler2D inNormal;
+layout(binding = 0, r32f) uniform image2D outImage;
+
+
+
+
+layout(binding = 0) uniform UBOParas {
+    int aoType;
+    int sampleStep;
+    int sampleStepNum;
+    int sampleDirections;
+    float maxRadius0;
+    float maxRadius1;
+}params;
+
+layout(binding = 1) uniform UBOVP {
+    mat4 V;
+    mat4 P;
+    vec3 eyePos;
+}uboCamera;
+
+#define PI 3.1415926535897932384626433832795
+#define PI05 1.5707963267948966192313216916398
+
+
+
+
+
+
+
+float rand(vec2 co) { return fract(sin(dot(co, vec2(12.9898, 78.233))) * 43758.5453); }
+
+mat2 rotate(float angle) {
+    float sinAngle = sin(angle);
+    float cosAngle = cos(angle);
+    return mat2(cosAngle, sinAngle, -sinAngle, cosAngle);
+}
+
+float integrateArcGTAOUniform(float h1, float h2) { return 1 - .5 * (cos(h1) + cos(h2)); }
+
+float integrateArcGTAOCosine(float h1, float h2, float n) {
+    return (-.25 * (cos(2 * h1 - n) + cos(2 * h2 - n)) + .5 * (cos(n) + (h1 + h2) * sin(n)));
+}
+float GTAOFastSqrt(float x) { return uintBitsToFloat(0x1FBD1DF5 + (floatBitsToUint(x) >> 1)); }
+
+float GTAOFastAcos(float x) {
+    float res = -.156583 * abs(x) + PI / 2.;
+    res *= GTAOFastSqrt(1. - abs(x));
+    return x >= 0 ? res : (PI - res);
+}
+float getDepth(vec2 uv) {
+    // #ifdef VULKAN
+    // uv.y=1.-uv.y;
+    // #endif
+    return texture(inDepth, uv).r;
+}
+
+float CalcAO(vec2 texcoord, vec2 dxy) {
+   
+    float ao = 0.; 
+    float depth0 = getDepth(texcoord);    
+    if (depth0 == 1) return 0;    
+   
+    mat4 transM = inverse(uboCamera.P);
+    vec4 p0 = transM * vec4(texcoord * 2 - 1, depth0, 1);
+    p0.xyz /= p0.w;   
+   
+    vec3 V = normalize(-p0.xyz);   
+    vec3 N = texture(inNormal, texcoord).xyz;  
+
+    // Declare temporary variables.
+    vec4 temph;
+    vec2 duv;
+    float depth;
+
+    // Compute the angle increment for each sampling direction.
+    float d_angle = PI / params.sampleDirections;   
+    // Generate a random value to perturb the sampling direction.
+    float randval = rand(texcoord);   
+    // Create a rotation matrix to rotate the sampling direction.
+    mat2 rotM = rotate(randval * 2 * PI);   
+    float k;  
+    // Begin iterating over each sampling direction.
+    for (uint i = 0; i < params.sampleDirections; ++i) {
+        float cosh1 = -1, cosh2 = -1;        
+        // Rotate the sampling direction.
+        vec2 dir = rotM * vec2(cos(d_angle * i), sin(d_angle * i));        
+        // Sample incrementally for each direction.
+        for (int j = 1; j <= params.sampleStepNum; ++j) {
+            // Calculate the texture coordinate offset for the current sampling step.
+            duv = (j + randval - 0.5) * dir * dxy * params.sampleStep;           
+            // Fetch the depth value at the offset texture coordinate and compute the AO value.
+            depth = getDepth(texcoord + duv);            
+            
+            if (depth < 1) {
+                temph = transM * vec4(2 * (texcoord + duv) - 1, depth, 1);
+                temph.xyz /= temph.w;
+                temph.xyz -= p0.xyz;               
+                // Compute the distance attenuation factor.
+                k = clamp((length(temph.xyz) - params.maxRadius0) / 
+                (params.maxRadius1 - params.maxRadius0), 0, 1);                
+                // Compute and normalize the direction of the AO contribution.
+                temph.xyz = normalize(temph.xyz);               
+                // Compute the occlusion of the current geometry on the view direction, 
+                // retaining the maximum occlusion.
+                cosh1 = max(mix(dot(temph.xyz, V), -1, k), cosh1);
+            }           
+            // Similarly, handle the texture coordinate offset in the opposite direction.
+            depth = getDepth(texcoord - duv);
+            if (depth < 1) {
+                temph = transM * vec4(2 * (texcoord - duv) - 1, depth, 1);
+                temph.xyz /= temph.w;
+                temph.xyz -= p0.xyz;
+                k = clamp((length(temph.xyz) - params.maxRadius0) / 
+                (params.maxRadius1 - params.maxRadius0), 0, 1);
+                temph.xyz = normalize(temph.xyz);
+                cosh2 = max(mix(dot(temph.xyz, V), -1, k), cosh2);
+            }
+        }
+
+        // Compute Sn and Np vectors; 
+        // they are the cross product of the view direction and sampling direction, 
+        // and the adjusted normal direction, respectively.
+        vec3 Sn = cross(V, vec3(dir, 0));
+        vec3 Np = normalize(N - dot(N, Sn) * Sn);
+
+        // Compute the dot product of Np and 
+        // the sampling direction to determine the rotation direction of Np.
+        float s = dot(Np, vec3(dir, 0)) > dot(V, vec3(dir, 0)) ? -1 : 1;
+
+        // Compute angle np, which is the angle between Np and the view direction.
+        float np = s * GTAOFastAcos(clamp(dot(V, Np), 0, 1));
+
+        // Compute boundary angles h1 and h2; 
+        // they represent the range of angles over 
+        // which geometry occludes the view direction in the current sampling direction.
+        float h1 = np + max(-GTAOFastAcos(cosh1) - np, -PI05);  // h1<0
+        float h2 = np + min(GTAOFastAcos(cosh2) - np, PI05);
+
+        // Compute the AO value in the current sampling direction based on the AO type, 
+        // and accumulate to the total AO.
+        if (params.aoType == 0) {
+            ao += integrateArcGTAOUniform(h1, h2);
+        } else {
+            ao += integrateArcGTAOCosine(max(h1, -PI05), min(h2, PI05), np);
+        }
+    }
+
+    // Average the total AO over all sampling directions to get the final AO value.
+    return ao / params.sampleDirections;
+}
+
+
+float AverageAO(vec2 centerUV, vec2 dxy, ivec2 outImgDim) {
+    float sum = 0.0;
+    int validSampleCount = 0;
+
+    vec2 offsets[9] = vec2[](
+        vec2(-1, -1), vec2( 0, -1), vec2( 1, -1),
+        vec2(-1,  0), vec2( 0,  0), vec2( 1,  0),
+        vec2(-1,  1), vec2( 0,  1), vec2( 1,  1)
+    );
+
+    for(int i = 0; i < 9; i++) {
+        vec2 uv = centerUV + offsets[i] * dxy;
+        if(uv.x >= 0.0 && uv.x <= 1.0 && uv.y >= 0.0 && uv.y <= 1.0) {
+            sum += imageLoad(outImage, ivec2(uv * vec2(outImgDim))).r;
+            validSampleCount++;
+        }
+    }
+    
+    return validSampleCount > 0 ? sum / float(validSampleCount) : 0.0;
+}
+
+
+
+void main() {
+    // Get the dimensions of the output AO image.
+    ivec2 outImgDim = imageSize(outImage);
+
+    // Calculate the current thread's index.
+    ivec2 xy = ivec2(gl_GlobalInvocationID.x % outImgDim.x, gl_GlobalInvocationID.x / outImgDim.x);
+
+    // If the current thread goes beyond the image height, return immediately.
+    if (xy.y >= outImgDim.y)
+        return;
+
+    // Compute the size of each pixel in texture space.
+    vec2 dxy = 1.0 / vec2(outImgDim);
+
+    // Calculate the texture coordinates for the current pixel.
+    vec2 uv = (vec2(xy) + 0.5) * dxy;
+
+
+    
+    // Call the CalcAO function to compute the AO value for the current pixel.
+    float ao = CalcAO(uv, dxy);
+    imageStore(outImage, xy, vec4(ao, 0, 0, 1));
+
+
+    ao = AverageAO(uv, dxy, outImgDim);
+    imageStore(outImage, xy, vec4(ao, 0, 0, 1));
+    
+   
+   
+
+}
+

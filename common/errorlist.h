@@ -1,0 +1,13 @@
+#pragma once
+
+enum Result {
+    RES_OK,
+    RES_FAILED,
+    RES_OUT_OF_MEMORY,
+    RES_FILE_NOT_FOUND,
+    RES_FILE_BAD_PATH,
+    RES_FILE_CANT_OPEN,
+    RES_FILE_CANT_READ,
+    RES_FILE_CANT_WRITE,
+    RES_TIMEOUT,
+};
