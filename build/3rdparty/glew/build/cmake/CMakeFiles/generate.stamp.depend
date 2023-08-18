@@ -1,8 +1,0 @@
-# CMake generation dependency list for this directory.
-E:/MSC-Project/simpleopengl/3rdparty/glew/build/cmake/CMakeLists.txt
-E:/MSC-Project/simpleopengl/3rdparty/glew/build/cmake/cmake_uninstall.cmake.in
-E:/MSC-Project/simpleopengl/3rdparty/glew/glew.pc.in
-E:/Tool/vs2022/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/share/cmake-3.24/Modules/FindOpenGL.cmake
-E:/Tool/vs2022/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/share/cmake-3.24/Modules/FindPackageHandleStandardArgs.cmake
-E:/Tool/vs2022/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/share/cmake-3.24/Modules/FindPackageMessage.cmake
-E:/Tool/vs2022/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/share/cmake-3.24/Modules/GNUInstallDirs.cmake
